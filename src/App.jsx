@@ -29,12 +29,20 @@ function useLocalState(key, initial) {
   return [state, setState];
 }
 
+/** Гибридная функция:
+ *  1) Боевой режим: Telegram WebApp user.id
+ *  2) Dev/браузер: ?tid=ВАШ_TELEGRAM_ID
+ *  3) Иначе — null (покажем аккуратную ошибку)
+ */
 function getTelegramId() {
   const tg = window.Telegram?.WebApp;
-  const tid = tg?.initDataUnsafe?.user?.id;
-  if (tid) return String(tid);
-  const params = new URLSearchParams(window.location.search);
-  return params.get("tid") || "123456789"; // демо-ID для браузера
+  const tidFromTG = tg?.initDataUnsafe?.user?.id;
+  if (tidFromTG) return String(tidFromTG);
+
+  const urlTid = new URLSearchParams(window.location.search).get("tid");
+  if (urlTid) return String(urlTid);
+
+  return null; // никаких демо-ID по умолчанию, чтобы не было 404 по «левому» айди
 }
 
 /* ===== Компоненты ===== */
@@ -269,6 +277,7 @@ export default function App() {
   const [stores, setStores] = useState([]);
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [fatal, setFatal] = useState("");
 
   const CATEGORIES = useMemo(
     () => ["Все", ...Array.from(new Set((products || []).map((p) => p.category).filter(Boolean)))],
@@ -293,7 +302,15 @@ export default function App() {
   useEffect(() => {
     (async () => {
       try {
+        setFatal("");
+
         const telegram_id = getTelegramId();
+        if (!telegram_id) {
+          setFatal("Откройте мини-приложение в Telegram или добавьте ?tid=ВАШ_TELEGRAM_ID в адресную строку.");
+          setLoading(false);
+          return;
+        }
+
         const repData = await getRepMe(telegram_id);
         setRep(repData.rep);
         setStores(repData.stores || []);
@@ -302,7 +319,11 @@ export default function App() {
         setProducts(items || []);
       } catch (e) {
         console.error(e);
-        alert("Ошибка загрузки данных. Проверь Sheets-доступ и CORS_ORIGIN.");
+        if (e?.message === "reps/me failed") {
+          setFatal("ТП с таким telegram_id не найден в таблице sales_reps. Проверьте значение.");
+        } else {
+          setFatal("Ошибка загрузки данных. Проверьте Sheets-доступ и CORS_ORIGIN.");
+        }
       } finally {
         setLoading(false);
       }
@@ -372,6 +393,10 @@ ${note ? `<div class="foot">Примечание: ${note}</div>` : ""}
   async function confirmOrder(payment) {
     if (!selectedStore || cart.length === 0) return;
     const telegram_id = getTelegramId();
+    if (!telegram_id) {
+      alert("Не найден telegram_id. Откройте в Telegram или добавьте ?tid=ВАШ_TELEGRAM_ID в адрес.");
+      return;
+    }
 
     const payload = {
       telegram_id,
@@ -397,6 +422,17 @@ ${note ? `<div class="foot">Примечание: ${note}</div>` : ""}
     return (
       <div className="p-6 text-sm text-gray-500">
         Загрузка данных…
+      </div>
+    );
+  }
+
+  if (fatal) {
+    return (
+      <div className="p-6">
+        <div className="rounded-2xl border p-4">
+          <div className="text-red-600 font-semibold mb-2">Нужно действие</div>
+          <div className="text-sm">{fatal}</div>
+        </div>
       </div>
     );
   }

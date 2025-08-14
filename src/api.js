@@ -2,7 +2,14 @@ const API = import.meta.env.VITE_API_BASE;
 
 export async function getRepMe(telegram_id) {
   const res = await fetch(`${API}/v1/reps/me?telegram_id=${encodeURIComponent(telegram_id)}`);
-  if (!res.ok) throw new Error("reps/me failed");
+  if (!res.ok) {
+    // даём понятный маркер, чтобы App.jsx мог отличить 404 от остальных
+    const text = await res.text().catch(() => "");
+    const err = new Error("reps/me failed");
+    err.status = res.status;
+    err.body = text;
+    throw err;
+  }
   return res.json();
 }
 
@@ -12,7 +19,13 @@ export async function getProducts(search = "", page = 1, limit = 100) {
   url.searchParams.set("page", page);
   url.searchParams.set("limit", limit);
   const res = await fetch(url);
-  if (!res.ok) throw new Error("products failed");
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    const err = new Error("products failed");
+    err.status = res.status;
+    err.body = text;
+    throw err;
+  }
   return res.json();
 }
 
@@ -22,6 +35,12 @@ export async function createOrder(payload) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
-  if (!res.ok) throw new Error("order failed");
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    const err = new Error("order failed");
+    err.status = res.status;
+    err.body = text;
+    throw err;
+  }
   return res.json();
 }
