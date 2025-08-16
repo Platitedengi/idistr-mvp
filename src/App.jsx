@@ -10,7 +10,7 @@ const KZT = new Intl.NumberFormat("ru-KZ", {
 });
 const uid = () => Math.random().toString(36).slice(2, 10).toUpperCase();
 const fuzzyIncludes = (hay, needle) =>
-  !needle || (hay || "").toString().toLowerCase().includes(needle.toString().toLowerCase());
+  !needle || (hay || "").toString().toLowerCase().includes((needle || "").toString().toLowerCase());
 
 function useLocalState(key, initial) {
   const [state, setState] = useState(() => {
@@ -29,25 +29,17 @@ function useLocalState(key, initial) {
   return [state, setState];
 }
 
-/** Пытаемся получить telegram_id:
- *  1) сначала ?tid=... из URL
- *  2) если нет — ждём до 2с появления Telegram.WebApp.initDataUnsafe.user.id
- */
-async function resolveTelegramId(maxWaitMs = 2000, stepMs = 200) {
-  // 1) URL-параметр
+/** Ждём telegram_id из WebApp с таймаутом + запасной вариант ?tid= */
+async function getTelegramIdAsync(maxMs = 3000) {
+  const start = Date.now();
+  while (Date.now() - start < maxMs) {
+    const tid = window?.Telegram?.WebApp?.initDataUnsafe?.user?.id;
+    if (tid) return String(tid);
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  // dev/подстраховка
   const urlTid = new URLSearchParams(window.location.search).get("tid");
   if (urlTid) return String(urlTid);
-
-  // 2) Telegram WebApp (ждём появления initDataUnsafe.user.id)
-  const tg = window?.Telegram?.WebApp;
-  if (!tg) return null;
-
-  const started = Date.now();
-  while (Date.now() - started < maxWaitMs) {
-    const tid = tg?.initDataUnsafe?.user?.id;
-    if (tid) return String(tid);
-    await new Promise((r) => setTimeout(r, stepMs));
-  }
   return null;
 }
 
@@ -106,9 +98,7 @@ const ProductFilters = ({ cat, setCat, categories }) => (
       <button
         key={c}
         onClick={() => setCat(c)}
-        className={`rounded-xl border px-3 py-1 text-sm ${
-          c === cat ? "bg-black text-white" : "bg-white"
-        }`}
+        className={`rounded-xl border px-3 py-1 text-sm ${c === cat ? "bg-black text-white" : "bg-white"}`}
       >
         {c}
       </button>
@@ -151,10 +141,7 @@ function ProductCard({ p, onAdd }) {
           +5
         </button>
         {Number(p.pack_size) > 1 && (
-          <button
-            className="rounded-xl border px-2 py-1"
-            onClick={() => onAdd(p, Number(p.pack_size))}
-          >
+          <button className="rounded-xl border px-2 py-1" onClick={() => onAdd(p, Number(p.pack_size))}>
             Упаковка
           </button>
         )}
@@ -174,10 +161,7 @@ function CartRow({ item, onQty, onRemove }) {
       </div>
       <div className="hidden sm:block sm:col-span-2 text-sm text-gray-500">{item.sku}</div>
       <div className="sm:col-span-3 flex items-center gap-2">
-        <button
-          className="rounded-lg border px-3 py-2"
-          onClick={() => onQty(item.id, Math.max(1, item.qty - 1))}
-        >
+        <button className="rounded-lg border px-3 py-2" onClick={() => onQty(item.id, Math.max(1, item.qty - 1))}>
           −
         </button>
         <input
@@ -192,9 +176,7 @@ function CartRow({ item, onQty, onRemove }) {
           +
         </button>
       </div>
-      <div className="sm:col-span-2 text-right font-medium">
-        {KZT.format(Number(item.price) * Number(item.qty))}
-      </div>
+      <div className="sm:col-span-2 text-right font-medium">{KZT.format(Number(item.price) * Number(item.qty))}</div>
       <div className="sm:col-span-0 sm:text-right">
         <button className="text-red-500 hover:underline" onClick={() => onRemove(item.id)}>
           Убрать
@@ -231,9 +213,7 @@ function PaymentModal({ open, total, onClose, onPaid }) {
               <button
                 key={m.key}
                 onClick={() => setMethod(m.key)}
-                className={`rounded-xl border px-3 py-2 ${
-                  method === m.key ? "bg-black text-white" : "bg-white"
-                }`}
+                className={`rounded-xl border px-3 py-2 ${method === m.key ? "bg-black text-white" : "bg-white"}`}
               >
                 {m.label}
               </button>
@@ -253,10 +233,7 @@ function PaymentModal({ open, total, onClose, onPaid }) {
           <button className="flex-1 rounded-xl border px-4 py-3" onClick={onClose}>
             Отмена
           </button>
-          <button
-            className="flex-1 rounded-xl bg-black px-4 py-3 text-white"
-            onClick={() => onPaid({ method, txn })}
-          >
+          <button className="flex-1 rounded-xl bg-black px-4 py-3 text-white" onClick={() => onPaid({ method, txn })}>
             Подтвердить
           </button>
         </div>
@@ -268,7 +245,7 @@ function PaymentModal({ open, total, onClose, onPaid }) {
 /* ===== Главный компонент ===== */
 
 export default function App() {
-  // безопасная инициализация Telegram WebApp
+  // Инициализация WebApp (после монтирования)
   useEffect(() => {
     const tg = window?.Telegram?.WebApp;
     try {
@@ -279,7 +256,6 @@ export default function App() {
   }, []);
 
   const [appKey, setAppKey] = useState(0);
-
   const [selectedStore, setSelectedStore] = useLocalState("idistr.store", "");
   const [recentIds, setRecentIds] = useLocalState("idistr.recents", []);
   const [cart, setCart] = useLocalState("idistr.cart", []);
@@ -303,27 +279,23 @@ export default function App() {
   const filteredProducts = useMemo(
     () =>
       (products || []).filter(
-        (p) =>
-          (cat === "Все" || p.category === cat) &&
-          (fuzzyIncludes(p.title, q) || fuzzyIncludes(p.sku, q))
+        (p) => (cat === "Все" || p.category === cat) && (fuzzyIncludes(p.title, q) || fuzzyIncludes(p.sku, q))
       ),
     [products, q, cat]
   );
 
-  const total = useMemo(
-    () => cart.reduce((s, i) => s + Number(i.price) * Number(i.qty), 0),
-    [cart]
-  );
+  const total = useMemo(() => cart.reduce((s, i) => s + Number(i.price) * Number(i.qty), 0), [cart]);
 
   useEffect(() => {
     (async () => {
       try {
         setFatal("");
 
-        const telegram_id = await resolveTelegramId(); // << ждём initData
+        const telegram_id = await getTelegramIdAsync(); // <-- ждём id до 3 секунд
         if (!telegram_id) {
           setFatal(
-            "Откройте мини-приложение в Telegram (кнопка в боте) или добавьте ?tid=ВАШ_TELEGRAM_ID в адресную строку."
+            "Откройте мини-приложение из кнопки бота в Telegram. " +
+              "Для теста в браузере можно добавить ?tid=ВАШ_TELEGRAM_ID к URL."
           );
           setLoading(false);
           return;
@@ -348,18 +320,14 @@ export default function App() {
     })();
   }, []);
 
-  const pushRecent = (id) =>
-    setRecentIds((old) => [id, ...old.filter((x) => x !== id)].slice(0, 10));
+  const pushRecent = (id) => setRecentIds((old) => [id, ...old.filter((x) => x !== id)].slice(0, 10));
 
   function addToCart(p, qty = 1) {
     pushRecent(p.id);
     setCart((old) => {
       const exists = old.find((x) => x.id === p.id);
       if (exists) return old.map((x) => (x.id === p.id ? { ...x, qty: x.qty + qty } : x));
-      return [
-        ...old,
-        { id: p.id, title: p.title, price: Number(p.price), sku: p.sku, qty },
-      ];
+      return [...old, { id: p.id, title: p.title, price: Number(p.price), sku: p.sku, qty }];
     });
   }
 
@@ -385,7 +353,9 @@ export default function App() {
 ${cart
   .map(
     (i, idx) =>
-      `<tr><td>${idx + 1}</td><td>${i.title}</td><td>${i.sku}</td><td>${i.qty}</td><td class="right">${i.price}</td><td class="right">${i.price * i.qty}</td></tr>`
+      `<tr><td>${idx + 1}</td><td>${i.title}</td><td>${i.sku}</td><td>${i.qty}</td><td class="right">${i.price}</td><td class="right">${
+        i.price * i.qty
+      }</td></tr>`
   )
   .join("")}
 </tbody><tfoot><tr><th colspan="5" class="right">Итого</th><th class="right">${total}</th></tr></tfoot></table>
@@ -402,7 +372,7 @@ ${note ? `<div class="foot">Примечание: ${note}</div>` : ""}
 
   async function confirmOrder(payment) {
     if (!selectedStore || cart.length === 0) return;
-    const telegram_id = await resolveTelegramId();
+    const telegram_id = await getTelegramIdAsync(0); // не ждём повторно
     if (!telegram_id) {
       alert("Не найден telegram_id. Откройте в Telegram или добавьте ?tid=ВАШ_TELEGRAM_ID в адрес.");
       return;
@@ -448,9 +418,7 @@ ${note ? `<div class="foot">Примечание: ${note}</div>` : ""}
       <header className="mb-6 flex items-center justify-between">
         <div>
           <div className="text-2xl font-bold">IDISTR — Mini-App (MVP)</div>
-          <div className="text-sm text-gray-500">
-            Быстрый сбор заказов • Фиксация оплаты • Печать чека (нал.)
-          </div>
+          <div className="text-sm text-gray-500">Быстрый сбор заказов • Фиксация оплаты • Печать чека (нал.)</div>
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -565,12 +533,7 @@ ${note ? `<div class="foot">Примечание: ${note}</div>` : ""}
         © 2025 IDISTR demo • Боевой режим (данные из Google Sheets)
       </footer>
 
-      <PaymentModal
-        open={openPay}
-        total={total}
-        onClose={() => setOpenPay(false)}
-        onPaid={confirmOrder}
-      />
+      <PaymentModal open={openPay} total={total} onClose={() => setOpenPay(false)} onPaid={confirmOrder} />
     </div>
   );
 }
