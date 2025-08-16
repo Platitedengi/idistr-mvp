@@ -34,6 +34,17 @@ function useLocalState(key, initial) {
  *  2) Dev/браузер: ?tid=ВАШ_TELEGRAM_ID
  *  3) Иначе — null (покажем аккуратную ошибку)
  */
+
+useEffect(() => {
+  const tg = window?.Telegram?.WebApp;
+  try {
+    tg?.ready?.();      // сигнал Telegram, что WebApp готов
+    tg?.expand?.();     // разворачиваем на весь экран
+    tg?.setHeaderColor?.("#ffffff"); // не обязательно, но стабилизирует UI на iOS
+  } catch {}
+}, []);
+
+
 function getTelegramId() {
   const tg = window.Telegram?.WebApp;
   const tidFromTG = tg?.initDataUnsafe?.user?.id;
