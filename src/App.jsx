@@ -29,19 +29,25 @@ function useLocalState(key, initial) {
   return [state, setState];
 }
 
-/** Гибридная функция:
- *  1) Боевой режим: Telegram WebApp user.id
- *  2) Dev/браузер: ?tid=ВАШ_TELEGRAM_ID
- *  3) Иначе — null (покажем аккуратную ошибку)
+/** Пытаемся получить telegram_id:
+ *  1) сначала ?tid=... из URL
+ *  2) если нет — ждём до 2с появления Telegram.WebApp.initDataUnsafe.user.id
  */
-function getTelegramId() {
-  const tg = window?.Telegram?.WebApp;
-  const tidFromTG = tg?.initDataUnsafe?.user?.id;
-  if (tidFromTG) return String(tidFromTG);
-
+async function resolveTelegramId(maxWaitMs = 2000, stepMs = 200) {
+  // 1) URL-параметр
   const urlTid = new URLSearchParams(window.location.search).get("tid");
   if (urlTid) return String(urlTid);
 
+  // 2) Telegram WebApp (ждём появления initDataUnsafe.user.id)
+  const tg = window?.Telegram?.WebApp;
+  if (!tg) return null;
+
+  const started = Date.now();
+  while (Date.now() - started < maxWaitMs) {
+    const tid = tg?.initDataUnsafe?.user?.id;
+    if (tid) return String(tid);
+    await new Promise((r) => setTimeout(r, stepMs));
+  }
   return null;
 }
 
@@ -262,6 +268,16 @@ function PaymentModal({ open, total, onClose, onPaid }) {
 /* ===== Главный компонент ===== */
 
 export default function App() {
+  // безопасная инициализация Telegram WebApp
+  useEffect(() => {
+    const tg = window?.Telegram?.WebApp;
+    try {
+      tg?.ready?.();
+      tg?.expand?.();
+      tg?.setHeaderColor?.("#ffffff");
+    } catch {}
+  }, []);
+
   const [appKey, setAppKey] = useState(0);
 
   const [selectedStore, setSelectedStore] = useLocalState("idistr.store", "");
@@ -304,22 +320,10 @@ export default function App() {
       try {
         setFatal("");
 
-        // ✅ безаварийная инициализация Telegram WebApp
-        try {
-          const tg = window?.Telegram?.WebApp;
-          setTimeout(() => {
-            try {
-              tg?.ready?.();
-              tg?.expand?.();
-              tg?.setHeaderColor?.("#ffffff");
-            } catch {}
-          }, 0);
-        } catch {}
-
-        const telegram_id = getTelegramId();
+        const telegram_id = await resolveTelegramId(); // << ждём initData
         if (!telegram_id) {
           setFatal(
-            "Откройте мини-приложение в Telegram или добавьте ?tid=ВАШ_TELEGRAM_ID в адресную строку."
+            "Откройте мини-приложение в Telegram (кнопка в боте) или добавьте ?tid=ВАШ_TELEGRAM_ID в адресную строку."
           );
           setLoading(false);
           return;
@@ -354,13 +358,7 @@ export default function App() {
       if (exists) return old.map((x) => (x.id === p.id ? { ...x, qty: x.qty + qty } : x));
       return [
         ...old,
-        {
-          id: p.id,
-          title: p.title,
-          price: Number(p.price),
-          sku: p.sku,
-          qty,
-        },
+        { id: p.id, title: p.title, price: Number(p.price), sku: p.sku, qty },
       ];
     });
   }
@@ -387,9 +385,7 @@ export default function App() {
 ${cart
   .map(
     (i, idx) =>
-      `<tr><td>${idx + 1}</td><td>${i.title}</td><td>${i.sku}</td><td>${i.qty}</td><td class="right">${
-        i.price
-      }</td><td class="right">${i.price * i.qty}</td></tr>`
+      `<tr><td>${idx + 1}</td><td>${i.title}</td><td>${i.sku}</td><td>${i.qty}</td><td class="right">${i.price}</td><td class="right">${i.price * i.qty}</td></tr>`
   )
   .join("")}
 </tbody><tfoot><tr><th colspan="5" class="right">Итого</th><th class="right">${total}</th></tr></tfoot></table>
@@ -406,7 +402,7 @@ ${note ? `<div class="foot">Примечание: ${note}</div>` : ""}
 
   async function confirmOrder(payment) {
     if (!selectedStore || cart.length === 0) return;
-    const telegram_id = getTelegramId();
+    const telegram_id = await resolveTelegramId();
     if (!telegram_id) {
       alert("Не найден telegram_id. Откройте в Telegram или добавьте ?tid=ВАШ_TELEGRAM_ID в адрес.");
       return;
@@ -546,7 +542,7 @@ ${note ? `<div class="foot">Примечание: ${note}</div>` : ""}
             </div>
 
             <div className="mt-4 border-t pt-4">
-              <div className="flex items-center justify_between text-sm text-gray-600">
+              <div className="flex items-center justify-between text-sm text-gray-600">
                 <span>Итого</span>
                 <span className="text-base font-semibold">{KZT.format(total)}</span>
               </div>
