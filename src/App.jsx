@@ -34,26 +34,15 @@ function useLocalState(key, initial) {
  *  2) Dev/браузер: ?tid=ВАШ_TELEGRAM_ID
  *  3) Иначе — null (покажем аккуратную ошибку)
  */
-
-useEffect(() => {
-  const tg = window?.Telegram?.WebApp;
-  try {
-    tg?.ready?.();      // сигнал Telegram, что WebApp готов
-    tg?.expand?.();     // разворачиваем на весь экран
-    tg?.setHeaderColor?.("#ffffff"); // не обязательно, но стабилизирует UI на iOS
-  } catch {}
-}, []);
-
-
 function getTelegramId() {
-  const tg = window.Telegram?.WebApp;
+  const tg = window?.Telegram?.WebApp;
   const tidFromTG = tg?.initDataUnsafe?.user?.id;
   if (tidFromTG) return String(tidFromTG);
 
   const urlTid = new URLSearchParams(window.location.search).get("tid");
   if (urlTid) return String(urlTid);
 
-  return null; // никаких демо-ID по умолчанию, чтобы не было 404 по «левому» айди
+  return null;
 }
 
 /* ===== Компоненты ===== */
@@ -315,9 +304,23 @@ export default function App() {
       try {
         setFatal("");
 
+        // ✅ безаварийная инициализация Telegram WebApp
+        try {
+          const tg = window?.Telegram?.WebApp;
+          setTimeout(() => {
+            try {
+              tg?.ready?.();
+              tg?.expand?.();
+              tg?.setHeaderColor?.("#ffffff");
+            } catch {}
+          }, 0);
+        } catch {}
+
         const telegram_id = getTelegramId();
         if (!telegram_id) {
-          setFatal("Откройте мини-приложение в Telegram или добавьте ?tid=ВАШ_TELEGRAM_ID в адресную строку.");
+          setFatal(
+            "Откройте мини-приложение в Telegram или добавьте ?tid=ВАШ_TELEGRAM_ID в адресную строку."
+          );
           setLoading(false);
           return;
         }
@@ -430,11 +433,7 @@ ${note ? `<div class="foot">Примечание: ${note}</div>` : ""}
   }
 
   if (loading) {
-    return (
-      <div className="p-6 text-sm text-gray-500">
-        Загрузка данных…
-      </div>
-    );
+    return <div className="p-6 text-sm text-gray-500">Загрузка данных…</div>;
   }
 
   if (fatal) {
@@ -547,7 +546,7 @@ ${note ? `<div class="foot">Примечание: ${note}</div>` : ""}
             </div>
 
             <div className="mt-4 border-t pt-4">
-              <div className="flex items-center justify-between text-sm text-gray-600">
+              <div className="flex items-center justify_between text-sm text-gray-600">
                 <span>Итого</span>
                 <span className="text-base font-semibold">{KZT.format(total)}</span>
               </div>
