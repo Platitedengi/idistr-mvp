@@ -356,7 +356,7 @@ export default function App() {
       old.map((x) => {
         if (x?.id) return x;
         const p = products.find((p) => p.sku === x.sku || p.title === x.title);
-        return p ? { ...x, id: p.id } : x;
+        return p ? { ...x, id: p.id || p.sku } : x;
       })
     );
   }, [products]);
@@ -365,14 +365,17 @@ export default function App() {
     setRecentIds((old) => [id, ...old.filter((x) => x !== id)].slice(0, 10));
 
   function addToCart(p, qty = 1) {
-    pushRecent(p.id);
+    const effectiveId = p.id || p.sku;
+    pushRecent(effectiveId);
     setCart((old) => {
-      const exists = old.find((x) => x.id === p.id);
-      if (exists) return old.map((x) => (x.id === p.id ? { ...x, qty: x.qty + qty } : x));
+      const exists = old.find((x) => x.id === effectiveId);
+      if (exists) {
+        return old.map((x) => (x.id === effectiveId ? { ...x, qty: x.qty + qty } : x));
+      }
       return [
         ...old,
         {
-          id: p.id,
+          id: effectiveId,
           title: p.title,
           price: Number(p.price),
           sku: p.sku,
@@ -430,9 +433,15 @@ ${note ? `<div class="foot">Примечание: ${note}</div>` : ""}
 
     // Нормализуем позиции: гарантируем наличие id у каждого товара
     const normalizedItems = cart.map((i) => {
+      const foundFromProducts = (products || []).find(
+        (p) => p.sku === i.sku || p.title === i.title
+      );
       const foundId =
         i.id ||
-        (products || []).find((p) => p.sku === i.sku || p.title === i.title)?.id;
+        i.sku ||
+        foundFromProducts?.id ||
+        foundFromProducts?.sku;
+
       return {
         id: foundId,
         qty: Number(i.qty),
@@ -532,10 +541,10 @@ ${note ? `<div class="foot">Примечание: ${note}</div>` : ""}
               <div className="text-sm font-semibold">Недавние</div>
               <div className="grid gap-3 sm:grid-cols-2">
                 {recentIds
-                  .map((id) => (products || []).find((p) => p.id === id))
+                  .map((id) => (products || []).find((p) => (p.id || p.sku) === id))
                   .filter(Boolean)
                   .map((p) => (
-                    <ProductCard key={p.id} p={p} onAdd={addToCart} />
+                    <ProductCard key={p.id || p.sku} p={p} onAdd={addToCart} />
                   ))}
               </div>
             </div>
@@ -543,7 +552,7 @@ ${note ? `<div class="foot">Примечание: ${note}</div>` : ""}
 
           <div className="grid gap-3 sm:grid-cols-2">
             {filteredProducts.map((p) => (
-              <ProductCard key={p.id} p={p} onAdd={addToCart} />
+              <ProductCard key={p.id || p.sku} p={p} onAdd={addToCart} />
             ))}
           </div>
         </div>
