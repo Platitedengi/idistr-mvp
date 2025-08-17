@@ -1,46 +1,125 @@
-const API = import.meta.env.VITE_API_BASE;
+// src/api.js
 
-export async function getRepMe(telegram_id) {
-  const res = await fetch(`${API}/v1/reps/me?telegram_id=${encodeURIComponent(telegram_id)}`);
+// Prefer VITE_API_BASE, fallback to VITE_API_URL for compatibility.
+const API =
+  import.meta.env.VITE_API_BASE ||
+  import.meta.env.VITE_API_URL ||
+  "";
+
+/**
+ * Ensure API is configured at build time.
+ */
+function assertApiBase() {
+  if (!API) {
+    throw new Error(
+      "API base URL is not configured. Set VITE_API_BASE in your env (e.g. https://idistr-backend.onrender.com)."
+    );
+  }
+}
+
+/**
+ * Unified JSON request helper with better error details.
+ * - Adds JSON headers automatically when body is provided.
+ * - Serializes query params safely.
+ * - Normalizes errors: err.status, err.detail (from FastAPI).
+ */
+async function requestJSON(path, { method = "GET", query, body } = {}) {
+  assertApiBase();
+
+  const url = new URL(path, API);
+  if (query && typeof query === "object") {
+    Object.entries(query).forEach(([k, v]) => {
+      if (v !== undefined && v !== null && v !== "") {
+        url.searchParams.set(k, String(v));
+      }
+    });
+  }
+
+  const init = { method, headers: {} };
+
+  if (body !== undefined) {
+    init.headers["Content-Type"] = "application/json";
+    init.body = JSON.stringify(body);
+  }
+
+  const res = await fetch(url.toString(), init);
+
   if (!res.ok) {
-    // даём понятный маркер, чтобы App.jsx мог отличить 404 от остальных
-    const text = await res.text().catch(() => "");
-    const err = new Error("reps/me failed");
+    // Try to extract FastAPI error payload
+    let detail = null;
+    try {
+      const data = await res.clone().json();
+      // FastAPI usually returns {detail: "..."} or an array of errors
+      detail = data?.detail ?? data;
+    } catch {
+      try {
+        detail = await res.text();
+      } catch {
+        detail = null;
+      }
+    }
+    const err = new Error(`Request failed ${res.status} ${res.statusText} @ ${url.pathname}`);
     err.status = res.status;
-    err.body = text;
+    err.detail = detail;
+    err.url = url.toString();
     throw err;
   }
+
   return res.json();
+}
+
+export async function getRepMe(telegram_id) {
+  return requestJSON("/v1/reps/me", {
+    query: { telegram_id },
+  }).catch((err) => {
+    // provide stable marker the app can rely on
+    const wrapped = new Error("reps/me failed");
+    wrapped.status = err.status;
+    wrapped.detail = err.detail;
+    wrapped.url = err.url;
+    throw wrapped;
+  });
 }
 
 export async function getProducts(search = "", page = 1, limit = 100) {
-  const url = new URL(`${API}/v1/products`);
-  if (search) url.searchParams.set("search", search);
-  url.searchParams.set("page", page);
-  url.searchParams.set("limit", limit);
-  const res = await fetch(url);
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    const err = new Error("products failed");
-    err.status = res.status;
-    err.body = text;
-    throw err;
-  }
-  return res.json();
+  return requestJSON("/v1/products", {
+    query: { search, page, limit },
+  }).catch((err) => {
+    const wrapped = new Error("products failed");
+    wrapped.status = err.status;
+    wrapped.detail = err.detail;
+    wrapped.url = err.url;
+    throw wrapped;
+  });
 }
 
 export async function createOrder(payload) {
-  const res = await fetch(`${API}/v1/orders`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    const err = new Error("order failed");
-    err.status = res.status;
-    err.body = text;
-    throw err;
+  // Light client-side guard to avoid 422 from obvious mistakes
+  if (!payload || typeof payload !== "object") {
+    const e = new Error("order payload must be an object");
+    e.status = 0;
+    throw e;
   }
-  return res.json();
+  // Normalize numeric fields
+  if (Array.isArray(payload.items)) {
+    payload = {
+      ...payload,
+      items: payload.items.map((i) => ({
+        id: i.id,
+        qty: Number(i.qty),
+        price: Number(i.price),
+      })),
+    };
+  }
+
+  return requestJSON("/v1/orders", {
+    method: "POST",
+    body: payload,
+  }).catch((err) => {
+    const wrapped = new Error("order failed");
+    wrapped.status = err.status;
+    wrapped.detail = err.detail;
+    wrapped.url = err.url;
+    throw wrapped;
+  });
 }
