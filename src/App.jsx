@@ -10,7 +10,7 @@ const KZT = new Intl.NumberFormat("ru-KZ", {
 });
 const uid = () => Math.random().toString(36).slice(2, 10).toUpperCase();
 const fuzzyIncludes = (hay, needle) =>
-  !needle || (hay || "").toString().toLowerCase().includes((needle || "").toString().toLowerCase());
+  !needle || (hay || "").toString().toLowerCase().includes(needle.toString().toLowerCase());
 
 function useLocalState(key, initial) {
   const [state, setState] = useState(() => {
@@ -29,17 +29,19 @@ function useLocalState(key, initial) {
   return [state, setState];
 }
 
-/** Ждём telegram_id из WebApp с таймаутом + запасной вариант ?tid= */
-async function getTelegramIdAsync(maxMs = 3000) {
-  const start = Date.now();
-  while (Date.now() - start < maxMs) {
-    const tid = window?.Telegram?.WebApp?.initDataUnsafe?.user?.id;
-    if (tid) return String(tid);
-    await new Promise((r) => setTimeout(r, 100));
-  }
-  // dev/подстраховка
+/** Гибридная функция:
+ *  1) Боевой режим: Telegram WebApp user.id
+ *  2) Dev/браузер: ?tid=ВАШ_TELEGRAM_ID
+ *  3) Иначе — null (аккуратная ошибка)
+ */
+function resolveTelegramId() {
+  const tg = window.Telegram?.WebApp;
+  const tidFromTG = tg?.initDataUnsafe?.user?.id;
+  if (tidFromTG) return String(tidFromTG);
+
   const urlTid = new URLSearchParams(window.location.search).get("tid");
   if (urlTid) return String(urlTid);
+
   return null;
 }
 
@@ -98,7 +100,9 @@ const ProductFilters = ({ cat, setCat, categories }) => (
       <button
         key={c}
         onClick={() => setCat(c)}
-        className={`rounded-xl border px-3 py-1 text-sm ${c === cat ? "bg-black text-white" : "bg-white"}`}
+        className={`rounded-xl border px-3 py-1 text-sm ${
+          c === cat ? "bg-black text-white" : "bg-gray-100 text-gray-900 border-gray-200"
+        }`}
       >
         {c}
       </button>
@@ -141,7 +145,10 @@ function ProductCard({ p, onAdd }) {
           +5
         </button>
         {Number(p.pack_size) > 1 && (
-          <button className="rounded-xl border px-2 py-1" onClick={() => onAdd(p, Number(p.pack_size))}>
+          <button
+            className="rounded-xl border px-2 py-1"
+            onClick={() => onAdd(p, Number(p.pack_size))}
+          >
             Упаковка
           </button>
         )}
@@ -161,7 +168,10 @@ function CartRow({ item, onQty, onRemove }) {
       </div>
       <div className="hidden sm:block sm:col-span-2 text-sm text-gray-500">{item.sku}</div>
       <div className="sm:col-span-3 flex items-center gap-2">
-        <button className="rounded-lg border px-3 py-2" onClick={() => onQty(item.id, Math.max(1, item.qty - 1))}>
+        <button
+          className="rounded-lg border px-3 py-2"
+          onClick={() => onQty(item.id, Math.max(1, item.qty - 1))}
+        >
           −
         </button>
         <input
@@ -176,7 +186,9 @@ function CartRow({ item, onQty, onRemove }) {
           +
         </button>
       </div>
-      <div className="sm:col-span-2 text-right font-medium">{KZT.format(Number(item.price) * Number(item.qty))}</div>
+      <div className="sm:col-span-2 text-right font-medium">
+        {KZT.format(Number(item.price) * Number(item.qty))}
+      </div>
       <div className="sm:col-span-0 sm:text-right">
         <button className="text-red-500 hover:underline" onClick={() => onRemove(item.id)}>
           Убрать
@@ -189,13 +201,22 @@ function CartRow({ item, onQty, onRemove }) {
 function PaymentModal({ open, total, onClose, onPaid }) {
   const [method, setMethod] = useState("Cash");
   const [txn, setTxn] = useState("");
+
   useEffect(() => {
     if (!open) {
       setMethod("Cash");
       setTxn("");
     }
   }, [open]);
+
   if (!open) return null;
+
+  const methods = [
+    { key: "Cash", label: "Наличные" },
+    { key: "Card", label: "Карта" },
+    { key: "QR", label: "QR" },
+    { key: "Kaspi", label: "Счёт Kaspi" },
+  ];
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
@@ -204,16 +225,15 @@ function PaymentModal({ open, total, onClose, onPaid }) {
         <div className="space-y-3">
           <label className="block text-sm">Метод оплаты</label>
           <div className="flex flex-wrap gap-2">
-            {[
-              { key: "Cash", label: "Наличные" },
-              { key: "Card", label: "Карта" },
-              { key: "QR", label: "QR" },
-              { key: "Kaspi", label: "Счёт Kaspi" },
-            ].map((m) => (
+            {methods.map((m) => (
               <button
                 key={m.key}
                 onClick={() => setMethod(m.key)}
-                className={`rounded-xl border px-3 py-2 ${method === m.key ? "bg-black text-white" : "bg-white"}`}
+                className={`rounded-xl border px-3 py-2 transition ${
+                  method === m.key
+                    ? "bg-black text-white border-black"
+                    : "bg-gray-100 text-gray-900 border-gray-200 hover:bg-gray-200"
+                }`}
               >
                 {m.label}
               </button>
@@ -233,7 +253,10 @@ function PaymentModal({ open, total, onClose, onPaid }) {
           <button className="flex-1 rounded-xl border px-4 py-3" onClick={onClose}>
             Отмена
           </button>
-          <button className="flex-1 rounded-xl bg-black px-4 py-3 text-white" onClick={() => onPaid({ method, txn })}>
+          <button
+            className="flex-1 rounded-xl bg-black px-4 py-3 text-white"
+            onClick={() => onPaid({ method, txn })}
+          >
             Подтвердить
           </button>
         </div>
@@ -245,7 +268,7 @@ function PaymentModal({ open, total, onClose, onPaid }) {
 /* ===== Главный компонент ===== */
 
 export default function App() {
-  // Инициализация WebApp (после монтирования)
+  // корректная инициализация Telegram WebApp API
   useEffect(() => {
     const tg = window?.Telegram?.WebApp;
     try {
@@ -265,11 +288,12 @@ export default function App() {
   const [openPay, setOpenPay] = useState(false);
 
   // Данные с API
-  const [rep, setRep] = useState(null);
+  const [rep, setRep] = useState(null); // оставляем; может пригодиться в UI
   const [stores, setStores] = useState([]);
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [fatal, setFatal] = useState("");
+  const [telegramId, setTelegramId] = useState(null);
 
   const CATEGORIES = useMemo(
     () => ["Все", ...Array.from(new Set((products || []).map((p) => p.category).filter(Boolean)))],
@@ -279,30 +303,35 @@ export default function App() {
   const filteredProducts = useMemo(
     () =>
       (products || []).filter(
-        (p) => (cat === "Все" || p.category === cat) && (fuzzyIncludes(p.title, q) || fuzzyIncludes(p.sku, q))
+        (p) =>
+          (cat === "Все" || p.category === cat) &&
+          (fuzzyIncludes(p.title, q) || fuzzyIncludes(p.sku, q))
       ),
     [products, q, cat]
   );
 
-  const total = useMemo(() => cart.reduce((s, i) => s + Number(i.price) * Number(i.qty), 0), [cart]);
+  const total = useMemo(
+    () => cart.reduce((s, i) => s + Number(i.price) * Number(i.qty), 0),
+    [cart]
+  );
 
   useEffect(() => {
     (async () => {
       try {
         setFatal("");
 
-        const telegram_id = await getTelegramIdAsync(); // <-- ждём id до 3 секунд
-        if (!telegram_id) {
+        const tid = resolveTelegramId();
+        if (!tid) {
           setFatal(
-            "Откройте мини-приложение из кнопки бота в Telegram. " +
-              "Для теста в браузере можно добавить ?tid=ВАШ_TELEGRAM_ID к URL."
+            "Откройте мини-приложение в Telegram (синяя кнопка) или добавьте ?tid=ВАШ_TELEGRAM_ID в адресную строку."
           );
           setLoading(false);
           return;
         }
+        setTelegramId(tid);
 
-        const repData = await getRepMe(telegram_id);
-        setRep(repData.rep);
+        const repData = await getRepMe(tid);
+        setRep(repData.rep || null);
         setStores(repData.stores || []);
 
         const { items } = await getProducts("");
@@ -320,14 +349,24 @@ export default function App() {
     })();
   }, []);
 
-  const pushRecent = (id) => setRecentIds((old) => [id, ...old.filter((x) => x !== id)].slice(0, 10));
+  const pushRecent = (id) =>
+    setRecentIds((old) => [id, ...old.filter((x) => x !== id)].slice(0, 10));
 
   function addToCart(p, qty = 1) {
     pushRecent(p.id);
     setCart((old) => {
       const exists = old.find((x) => x.id === p.id);
       if (exists) return old.map((x) => (x.id === p.id ? { ...x, qty: x.qty + qty } : x));
-      return [...old, { id: p.id, title: p.title, price: Number(p.price), sku: p.sku, qty }];
+      return [
+        ...old,
+        {
+          id: p.id,
+          title: p.title,
+          price: Number(p.price),
+          sku: p.sku,
+          qty,
+        },
+      ];
     });
   }
 
@@ -353,9 +392,9 @@ export default function App() {
 ${cart
   .map(
     (i, idx) =>
-      `<tr><td>${idx + 1}</td><td>${i.title}</td><td>${i.sku}</td><td>${i.qty}</td><td class="right">${i.price}</td><td class="right">${
-        i.price * i.qty
-      }</td></tr>`
+      `<tr><td>${idx + 1}</td><td>${i.title}</td><td>${i.sku}</td><td>${i.qty}</td><td class="right">${
+        i.price
+      }</td><td class="right">${i.price * i.qty}</td></tr>`
   )
   .join("")}
 </tbody><tfoot><tr><th colspan="5" class="right">Итого</th><th class="right">${total}</th></tr></tfoot></table>
@@ -372,14 +411,13 @@ ${note ? `<div class="foot">Примечание: ${note}</div>` : ""}
 
   async function confirmOrder(payment) {
     if (!selectedStore || cart.length === 0) return;
-    const telegram_id = await getTelegramIdAsync(0); // не ждём повторно
-    if (!telegram_id) {
+    if (!telegramId) {
       alert("Не найден telegram_id. Откройте в Telegram или добавьте ?tid=ВАШ_TELEGRAM_ID в адрес.");
       return;
     }
 
     const payload = {
-      telegram_id,
+      telegram_id: telegramId,
       store_id: selectedStore,
       items: cart.map((i) => ({ id: i.id, qty: i.qty, price: Number(i.price) })),
       payment: { method: payment.method, txn: payment.txn || "" },
@@ -418,7 +456,9 @@ ${note ? `<div class="foot">Примечание: ${note}</div>` : ""}
       <header className="mb-6 flex items-center justify-between">
         <div>
           <div className="text-2xl font-bold">IDISTR — Mini-App (MVP)</div>
-          <div className="text-sm text-gray-500">Быстрый сбор заказов • Фиксация оплаты • Печать чека (нал.)</div>
+          <div className="text-sm text-gray-500">
+            Быстрый сбор заказов • Фиксация оплаты • Печать чека (нал.)
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -522,7 +562,8 @@ ${note ? `<div class="foot">Примечание: ${note}</div>` : ""}
                 Перейти к оплате
               </button>
               <p className="mt-2 text-xs text-gray-500">
-                Подтверждение создаёт запись в Google Sheets через бэкенд. Чек печатается только для «Наличные».
+                Подтверждение создаёт запись в Google Sheets через бэкенд. Чек печатается только для
+                «Наличные».
               </p>
             </div>
           </div>
