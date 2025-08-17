@@ -1,16 +1,19 @@
 // src/api.js
 
 // Prefer VITE_API_BASE, fallback to VITE_API_URL for compatibility.
-const API =
+export const API_BASE =
   import.meta.env.VITE_API_BASE ||
   import.meta.env.VITE_API_URL ||
   "";
+
+// Optional verbose logging controlled via env
+const DEBUG_API = String(import.meta.env.VITE_DEBUG_API || "").toLowerCase() === "true";
 
 /**
  * Ensure API is configured at build time.
  */
 function assertApiBase() {
-  if (!API) {
+  if (!API_BASE) {
     throw new Error(
       "API base URL is not configured. Set VITE_API_BASE in your env (e.g. https://idistr-backend.onrender.com)."
     );
@@ -26,7 +29,8 @@ function assertApiBase() {
 async function requestJSON(path, { method = "GET", query, body } = {}) {
   assertApiBase();
 
-  const url = new URL(path, API);
+  // Build absolute URL safely regardless of leading slash
+  const url = new URL(path, API_BASE);
   if (query && typeof query === "object") {
     Object.entries(query).forEach(([k, v]) => {
       if (v !== undefined && v !== null && v !== "") {
@@ -35,14 +39,24 @@ async function requestJSON(path, { method = "GET", query, body } = {}) {
     });
   }
 
-  const init = { method, headers: {} };
+  const init = { method, headers: { Accept: "application/json" } };
 
   if (body !== undefined) {
-    init.headers["Content-Type"] = "application/json";
+    init.headers["Content-Type"] = "application/json"; // FastAPI expects this
     init.body = JSON.stringify(body);
   }
 
+  if (DEBUG_API) {
+    // eslint-disable-next-line no-console
+    console.log(`[API → ${method}]`, url.toString(), body ?? "");
+  }
+
   const res = await fetch(url.toString(), init);
+
+  if (DEBUG_API) {
+    // eslint-disable-next-line no-console
+    console.log(`[API ← ${res.status}]`, url.pathname);
+  }
 
   if (!res.ok) {
     // Try to extract FastAPI error payload
@@ -62,11 +76,19 @@ async function requestJSON(path, { method = "GET", query, body } = {}) {
     err.status = res.status;
     err.detail = detail;
     err.url = url.toString();
+    if (DEBUG_API) {
+      // eslint-disable-next-line no-console
+      console.error("[API ERROR]", err);
+    }
     throw err;
   }
 
+  // Some endpoints (204) have no JSON
+  if (res.status === 204) return {};
   return res.json();
 }
+
+// --- Public API wrappers ----------------------------------------------------
 
 export async function getRepMe(telegram_id) {
   return requestJSON("/v1/reps/me", {
@@ -93,28 +115,47 @@ export async function getProducts(search = "", page = 1, limit = 100) {
   });
 }
 
-export async function createOrder(payload) {
-  // Light client-side guard to avoid 422 from obvious mistakes
-  if (!payload || typeof payload !== "object") {
-    const e = new Error("order payload must be an object");
-    e.status = 0;
-    throw e;
+// Helper to normalize and validate order payload to avoid 422
+function normalizeOrderPayload(input) {
+  if (!input || typeof input !== "object") {
+    throw Object.assign(new Error("order payload must be an object"), { status: 0 });
   }
-  // Normalize numeric fields
-  if (Array.isArray(payload.items)) {
-    payload = {
-      ...payload,
-      items: payload.items.map((i) => ({
-        id: i.id,
-        qty: Number(i.qty),
-        price: Number(i.price),
-      })),
+
+  const out = { ...input };
+
+  // Normalize telegram_id & store_id to strings (backend usually accepts str)
+  if (out.telegram_id !== undefined) out.telegram_id = String(out.telegram_id);
+  if (out.store_id !== undefined) out.store_id = String(out.store_id);
+
+  if (Array.isArray(out.items)) {
+    out.items = out.items.map((i) => ({
+      id: i.id, // keep as-is (can be SKU string or numeric id)
+      qty: Number(i.qty),
+      price: Number(i.price),
+    }));
+  }
+
+  if (!out.items || !out.items.length) {
+    throw Object.assign(new Error("order must contain at least 1 item"), { status: 0 });
+  }
+
+  // payment normalization
+  if (out.payment && typeof out.payment === "object") {
+    out.payment = {
+      method: String(out.payment.method || ""),
+      txn: out.payment.txn ? String(out.payment.txn) : "",
     };
   }
 
+  return out;
+}
+
+export async function createOrder(payload) {
+  const body = normalizeOrderPayload(payload);
+
   return requestJSON("/v1/orders", {
     method: "POST",
-    body: payload,
+    body,
   }).catch((err) => {
     const wrapped = new Error("order failed");
     wrapped.status = err.status;
