@@ -349,6 +349,18 @@ export default function App() {
     })();
   }, []);
 
+  // Миграция: если в старых данных корзины нет id, восстановим его по sku/названию
+  useEffect(() => {
+    if (!products || products.length === 0) return;
+    setCart((old) =>
+      old.map((x) => {
+        if (x?.id) return x;
+        const p = products.find((p) => p.sku === x.sku || p.title === x.title);
+        return p ? { ...x, id: p.id } : x;
+      })
+    );
+  }, [products]);
+
   const pushRecent = (id) =>
     setRecentIds((old) => [id, ...old.filter((x) => x !== id)].slice(0, 10));
 
@@ -416,10 +428,29 @@ ${note ? `<div class="foot">Примечание: ${note}</div>` : ""}
       return;
     }
 
+    // Нормализуем позиции: гарантируем наличие id у каждого товара
+    const normalizedItems = cart.map((i) => {
+      const foundId =
+        i.id ||
+        (products || []).find((p) => p.sku === i.sku || p.title === i.title)?.id;
+      return {
+        id: foundId,
+        qty: Number(i.qty),
+        price: Number(i.price),
+      };
+    });
+
+    // Если у какой-то позиции так и нет id — просим пере-добавить
+    const broken = normalizedItems.find((x) => !x.id);
+    if (broken) {
+      alert("Не удалось определить ID для одного из товаров. Удалите его из корзины и добавьте заново.");
+      return;
+    }
+
     const payload = {
       telegram_id: telegramId,
       store_id: selectedStore,
-      items: cart.map((i) => ({ id: i.id, qty: i.qty, price: Number(i.price) })),
+      items: normalizedItems,
       payment: { method: payment.method, txn: payment.txn || "" },
       note,
     };
@@ -431,7 +462,7 @@ ${note ? `<div class="foot">Примечание: ${note}</div>` : ""}
       resetAll();
       alert(`Заказ создан: ${res.order_id}`);
     } catch (e) {
-      console.error(e);
+      console.error("createOrder failed", e);
       alert("Ошибка создания заказа");
     }
   }
